@@ -6,9 +6,11 @@ This little python snippet allows you to download all the new Sonoma Aerials so 
 
 To use:
 
-`pip install -r requirements.txt`
-
-`sudo python3 app.py`
+- Download app.py and requirements.txt to a known folder (desktop recommended for ease of use).
+- Open your Terminal.
+- `cd ~/Desktop`
+- `pip install -r requirements.txt`
+- `sudo python3 app.py`
 
 
 ## screenshot
