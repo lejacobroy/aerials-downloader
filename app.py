@@ -52,9 +52,8 @@ def killService():
     #idleassetsd
     subprocess.run(["killall", "idleassetsd"]) 
 
-def downloadAerials():
-    aerials = getAerials(json_file_path)
-    for aerial in aerials:
+def downloadAerials(selected_aerials):
+    for aerial in selected_aerials:
         if 'url-4K-SDR-240FPS' in aerial:
             # aerial has URL
             url = aerial["url-4K-SDR-240FPS"].replace('\\','')
@@ -65,8 +64,44 @@ def downloadAerials():
                 # save to folder with id 
                 downloadAerial(url, file_path, aerial["accessibilityLabel"])
 
-print("Loading Aerials list")
-downloadAerials()
+def user_selected_category_interface():
+    options = ["landscapes", "cities", "underwater", "space", "comp", "all"]
+    input_message = "Select screen saver Category from the options: \n"
+    user_input = ''
+    for index, item in enumerate(options):
+        input_message += f'{index+1}) {item}\n'
+
+    input_message += 'Selecting "All" will take up 65GB of space\n comp is miscellaneous \n Your choice: '
+
+    while user_input not in options:
+        print("***********************************************************************")
+        print("Please write the name of the category you want to download as given in the options")
+        print("***********************************************************************")
+        user_input = input(input_message)
+    return user_input
+
+def get_selected_aerial_list(json_file_path, selected_category):
+    aerials = getAerials(json_file_path)
+    selected_aerials = []
+
+    if selected_category.lower() == 'all':
+        return aerials
+    else:
+        for aerial in aerials:
+            if 'previewImage' in aerial:
+                last_part = aerial['previewImage'].split("/")[-1]
+                word = last_part.split("_")[0]
+                if word:
+                    if word.lower() == selected_category.lower():
+                        selected_aerials.append(aerial)
+    return selected_aerials
+
+print("Select Your Aerial List")
+selected_category = user_selected_category_interface()
+print("Filtering Aerials")
+selected_ariels = get_selected_aerial_list(json_file_path, selected_category)
+print("Downloading Aerials")
+downloadAerials(selected_ariels)
 print("Updating Aerials Database")
 updateSQL()
 print("Restarting service")
