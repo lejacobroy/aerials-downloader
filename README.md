@@ -12,6 +12,8 @@ To use:
 - `pip install -r requirements.txt`
 - `sudo python3 app.py`
 
+- Optional: to download more than one in parallel update the environment variable DOWNLOAD_THREADS.
+- For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
 
 ## screenshot
 ![Alt text](/aerials-downloader.png?raw=true "aerials-downloader")

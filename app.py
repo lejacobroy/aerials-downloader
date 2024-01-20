@@ -2,9 +2,11 @@ import json
 import requests
 import tqdm
 import urllib3
+import os
 import os.path
 import sqlite3
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 urllib3.disable_warnings()
 
 json_file_path='/Library/Application Support/com.apple.idleassetsd/Customer/entries.json'
@@ -52,18 +54,22 @@ def killService():
     #idleassetsd
     subprocess.run(["killall", "idleassetsd"]) 
 
+def downloadAerialsParallel(aerial):
+    if 'url-4K-SDR-240FPS' in aerial:
+        url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
+        file_path = aerial_folder_path + aerial["id"] + '.mov'
+        if not os.path.exists(file_path):
+            print("Start download of " + aerial["accessibilityLabel"])
+            downloadAerial(url, file_path, aerial["accessibilityLabel"])
+
 def downloadAerials():
     aerials = getAerials(json_file_path)
-    for aerial in aerials:
-        if 'url-4K-SDR-240FPS' in aerial:
-            # aerial has URL
-            url = aerial["url-4K-SDR-240FPS"].replace('\\','')
-            # check if file exists
-            file_path = aerial_folder_path+aerial["id"]+'.mov'
-            if not os.path.exists(file_path):
-                print("Start download of "+aerial["accessibilityLabel"])
-                # save to folder with id 
-                downloadAerial(url, file_path, aerial["accessibilityLabel"])
+    
+    # Get the number of download threads from the environment variable
+    download_threads = int(os.environ.get('DOWNLOAD_THREADS', 1))
+
+    with ThreadPoolExecutor(max_workers=download_threads) as executor:
+        executor.map(downloadAerialsParallel, aerials)
 
 print("Loading Aerials list")
 downloadAerials()
