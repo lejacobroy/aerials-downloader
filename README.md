@@ -1,20 +1,20 @@
 # aerials-downloader
 
 This little python snippet allows you to download all the new Sonoma Aerials so they are available to shuffle.
+
 You can also select Categories and Subcategories of video to download, and download them in parallel.
 
 ### warning, if you download all the video files in 4KSDR240FPS, it will take 65 GB of space.
 
 To use:
 
-- Download app.py and requirements.txt to a known folder (desktop recommended for ease of use).
-- Open your Terminal.
-- `cd ~/Desktop`
+- Clone the repository
 - `pip install -r requirements.txt`
 - `sudo python3 app.py`
 
-- Optional: to download more than one in parallel update the environment variable DOWNLOAD_THREADS.
-- For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
+Optional: to download more than one in parallel update the environment variable DOWNLOAD_THREADS.
+
+For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
 
 ## screenshot
 ![Alt text](/aerials-downloader.png?raw=true "aerials-downloader")
