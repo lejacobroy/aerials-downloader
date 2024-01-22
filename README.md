@@ -1,8 +1,9 @@
 # aerials-downloader
 
 This little python snippet allows you to download all the new Sonoma Aerials so they are available to shuffle.
+You can also select Categories and Subcategories of video to download, and download them in parallel.
 
-### warning, it will download all the video files in 4KSDR240FPS, taking 65 GB of space.
+### warning, if you download all the video files in 4KSDR240FPS, it will take 65 GB of space.
 
 To use:
 
