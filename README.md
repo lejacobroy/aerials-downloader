@@ -18,3 +18,9 @@ To use:
 
 ## screenshot
 ![Alt text](/aerials-downloader.png?raw=true "aerials-downloader")
+
+
+## contributors
+- [shinz4u](https://github.com/shinz4u)
+- [shawncl](https://github.com/shawncl)
+- [ismael-marcos](https://github.com/ismael-marcos)
