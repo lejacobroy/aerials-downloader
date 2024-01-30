@@ -9,7 +9,7 @@ You can also select Categories and Subcategories of video to download, and downl
 To use:
 
 - Clone the repository
-- `pip install -r requirements.txt`
+- `pip3 install -r requirements.txt`
 - `sudo python3 app.py`
 
 Optional: to download more than one in parallel update the environment variable DOWNLOAD_THREADS.
