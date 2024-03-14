@@ -1,5 +1,4 @@
 from iterfzf import iterfzf
-from pynight.common_icecream import ic
 import json
 import requests
 import tqdm
@@ -9,10 +8,25 @@ import os.path
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+
 urllib3.disable_warnings()
 
-json_file_path='/Library/Application Support/com.apple.idleassetsd/Customer/entries.json'
-aerial_folder_path='/Library/Application Support/com.apple.idleassetsd/Customer/4KSDR240FPS/'
+try:
+    #: used for printing diagnostic messages
+    from icecream import ic, colorize as ic_colorize
+
+    ic.configureOutput(outputFunction=lambda s: print(ic_colorize(s)))
+except ImportError:
+    #: Graceful fallback if Icecream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)
+
+json_file_path = (
+    "/Library/Application Support/com.apple.idleassetsd/Customer/entries.json"
+)
+aerial_folder_path = (
+    "/Library/Application Support/com.apple.idleassetsd/Customer/4KSDR240FPS/"
+)
+
 
 def getAerials(path):
     aerialsList = []
