@@ -193,7 +193,10 @@ def chooseAerials():
             yield aerial_name(aerial)
 
     # Use iterfzf to allow the user to filter the aerials
-    selected_aerials = iterfzf(aerial_generator())
+    selected_aerials = iterfzf(
+        aerial_generator(),
+        multi=True,
+    )
 
     # Filter filteredAerials based on the user's selection
     filteredAerials = [
