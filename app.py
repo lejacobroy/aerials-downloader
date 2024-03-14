@@ -1,3 +1,5 @@
+from iterfzf import iterfzf
+from pynight.common_icecream import ic
 import json
 import requests
 import tqdm
@@ -147,7 +149,26 @@ def chooseAerials():
                         if a['id'] not in aerials_set:
                             aerials_set.add(a['id'])
                             filteredAerials.append(a)
-    
+
+    ic(filteredAerials[0])
+
+    def aerial_name(aerial):
+        return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
+
+    # Create a generator function to yield the aerial names
+    def aerial_generator():
+        for aerial in filteredAerials:
+            yield aerial_name(aerial)
+
+    # Use iterfzf to allow the user to filter the aerials
+    selected_aerials = iterfzf(aerial_generator())
+
+    # Filter filteredAerials based on the user's selection
+    filteredAerials = [
+        aerial for aerial in filteredAerials
+        if aerial_name(aerial) in selected_aerials
+    ]
+
     print("Downloading "+str(len(filteredAerials))+" aerials")
 
     # Get the number of download threads from the environment variable
