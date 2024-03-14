@@ -37,27 +37,6 @@ def getAerials(path):
     return aerialsList
 
 
-def downloadAerial(url: str, file_path: str, name: str):
-    with open(file_path, "wb") as f:
-        with requests.get(url, stream=True, verify=False) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("content-length", 0))
-
-            # tqdm has many interesting parameters. Feel free to experiment!
-            tqdm_params = {
-                "desc": name,
-                "total": total,
-                "miniters": 1,
-                "unit": "B",
-                "unit_scale": True,
-                "unit_divisor": 1024,
-            }
-            with tqdm.tqdm(**tqdm_params) as pb:
-                for chunk in r.iter_content(chunk_size=8192):
-                    pb.update(len(chunk))
-                    f.write(chunk)
-
-
 def updateSQL():
     con = sqlite3.connect(
         "/Library/Application Support/com.apple.idleassetsd/Aerial.sqlite"
@@ -78,9 +57,50 @@ def downloadAerialsParallel(aerial):
     if "url-4K-SDR-240FPS" in aerial:
         url = aerial["url-4K-SDR-240FPS"].replace("\\", "")
         file_path = aerial_folder_path + aerial["id"] + ".mov"
-        if not os.path.exists(file_path):
+        if not os.path.exists(file_path) or not isFileComplete(file_path, url):
             print("Downloading " + aerial["accessibilityLabel"])
             downloadAerial(url, file_path, aerial["accessibilityLabel"])
+
+
+def isFileComplete(file_path, url):
+    if os.path.exists(file_path):
+        local_size = os.path.getsize(file_path)
+        remote_size = int(
+            requests.head(url, verify=False).headers.get("content-length", 0)
+        )
+        return local_size == remote_size
+    return False
+
+
+def downloadAerial(url: str, file_path: str, name: str):
+    resume_byte_position = 0
+    if os.path.exists(file_path):
+        resume_byte_position = os.path.getsize(file_path)
+
+    with open(file_path, "ab") as f:
+        with requests.get(
+            url,
+            stream=True,
+            verify=False,
+            headers={"Range": f"bytes={resume_byte_position}-"},
+        ) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length", 0)) + resume_byte_position
+
+            # tqdm has many interesting parameters. Feel free to experiment!
+            tqdm_params = {
+                "desc": name,
+                "total": total,
+                "miniters": 1,
+                "unit": "B",
+                "unit_scale": True,
+                "unit_divisor": 1024,
+                "initial": resume_byte_position,
+            }
+            with tqdm.tqdm(**tqdm_params) as pb:
+                for chunk in r.iter_content(chunk_size=8192):
+                    pb.update(len(chunk))
+                    f.write(chunk)
 
 
 def chooseCategory():
