@@ -21,25 +21,25 @@ def getAerials(path):
     return aerialsList
 
 
-def downloadAerial(url: str, file_path: str, name:str):
-    with open(file_path, 'wb') as f:
-        with requests.get(url, stream=True,verify=False) as r:
-            r.raise_for_status()
-            total = int(r.headers.get('content-length', 0))
+def downloadAerial(url: str, file_path: str, name: str, resume_pos: int = 0):
+    r = requests.head(url, verify=False)
+    total = int(r.headers.get("content-length", 0))
+    with requests.get(url, stream=True, headers={"Range": f"bytes={resume_pos}-"}, verify=False) as r:
+        r.raise_for_status()
 
-            # tqdm has many interesting parameters. Feel free to experiment!
-            tqdm_params = {
-                'desc': name,
-                'total': total,
-                'miniters': 1,
-                'unit': 'B',
-                'unit_scale': True,
-                'unit_divisor': 1024,
-            }
-            with tqdm.tqdm(**tqdm_params) as pb:
-                for chunk in r.iter_content(chunk_size=8192):
-                    pb.update(len(chunk))
+        with open(file_path, "wb" if resume_pos == 0 else "ab") as f:
+            with tqdm.tqdm(
+                desc=name,
+                total=total,
+                miniters=1,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                initial=resume_pos,
+            ) as pb:
+                for chunk in r.iter_content(chunk_size=32 * 1024):
                     f.write(chunk)
+                    pb.update(len(chunk))
 
 
 def updateSQL():
@@ -59,8 +59,10 @@ def downloadAerialsParallel(aerial):
         url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
         file_path = aerial_folder_path + aerial["id"] + '.mov'
         if not os.path.exists(file_path):
-            print("Downloading " + aerial["accessibilityLabel"])
-            downloadAerial(url, file_path, aerial["accessibilityLabel"])
+            resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(file_path + ".downloading") else 0
+            downloadAerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov", resume_pos=resume_pos)
+            os.rename(file_path + ".downloading", file_path)
+
 
 def chooseCategory():
     chosen_category_obj = {}
