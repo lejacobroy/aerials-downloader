@@ -1,4 +1,6 @@
 import json
+from itertools import zip_longest
+
 import requests
 import tqdm
 import urllib3
@@ -7,6 +9,10 @@ import os.path
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+
+from requests.exceptions import ChunkedEncodingError
+from urllib3.exceptions import ProtocolError
+
 urllib3.disable_warnings()
 
 json_file_path='/Library/Application Support/com.apple.idleassetsd/Customer/entries.json'
@@ -52,16 +58,30 @@ def updateSQL():
 
 def killService():
     #idleassetsd
-    subprocess.run(["killall", "idleassetsd"]) 
+    subprocess.run(["killall", "idleassetsd"])
 
-def downloadAerialsParallel(aerial):
+def downloadAerialsParallel(aerial, max_retry = 5):
     if 'url-4K-SDR-240FPS' in aerial:
         url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
         file_path = aerial_folder_path + aerial["id"] + '.mov'
-        if not os.path.exists(file_path):
-            resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(file_path + ".downloading") else 0
-            downloadAerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov", resume_pos=resume_pos)
-            os.rename(file_path + ".downloading", file_path)
+        is_download_complete = os.path.exists(file_path)
+        retry = 0
+        while not is_download_complete and retry < max_retry:
+            try:
+                resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(file_path + ".downloading") else 0
+                downloadAerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov", resume_pos=resume_pos)
+                os.rename(file_path + ".downloading", file_path)
+                is_download_complete = True
+            except ChunkedEncodingError | ProtocolError as e:
+                retry += 1
+                if retry >= 5:
+                    print(
+                        f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. "
+                        f"Maximum retries reached. {repr(e)}."
+                    )
+            except Exception as e:
+                print(f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. {repr(e)}")
+
 
 
 def chooseCategory():
@@ -96,7 +116,7 @@ def chooseSubcategory(categoryObj):
     chosen_subcategory_obj = {}
     with open(json_file_path) as f:
         data = json.load(f)
-        # Get subcategories 
+        # Get subcategories
         subcategories = []
         j = 0
         # Print subcategories
@@ -105,7 +125,7 @@ def chooseSubcategory(categoryObj):
             j=j+1
             print(str(j)+'. '+subcat['localizedNameKey'].replace('AerialSubcategory', ''))
             subcategories.append(subcat['localizedNameKey'])
-        
+
         subcategories.append('All')
         print(str(j+1)+'. All')
 
@@ -149,14 +169,14 @@ def chooseAerials():
                         if a['id'] not in aerials_set:
                             aerials_set.add(a['id'])
                             filteredAerials.append(a)
-    
+
     print("Downloading "+str(len(filteredAerials))+" aerials")
 
     # Get the number of download threads from the environment variable
     download_threads = int(os.environ.get('DOWNLOAD_THREADS', 1))
-
+    max_retry = 5
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(downloadAerialsParallel, filteredAerials)
+        executor.map(downloadAerialsParallel, filteredAerials, [max_retry]*len(filteredAerials))
 
 
 print("Loading Aerials list")
