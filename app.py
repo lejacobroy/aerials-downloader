@@ -171,14 +171,19 @@ def chooseSubcategory(categoryObj):
                     break
     return chosen_subcategory_obj
 
-
 def chooseAerials():
     categoryObj = {}
     subcategoryObj = {}
 
-    categoryObj = chooseCategory()
-    if categoryObj != {}:
-        subcategoryObj = chooseSubcategory(categoryObj)
+    print("Select an option:")
+    print("1. Choose aerials manually")
+    print("2. Download all aerials")
+    choice = input("Enter option number: ")
+
+    if choice == "1":
+        categoryObj = chooseCategory()
+        if categoryObj != {}:
+            subcategoryObj = chooseSubcategory(categoryObj)
 
     aerials = getAerials(json_file_path)
 
@@ -202,26 +207,27 @@ def chooseAerials():
                             aerials_set.add(a["id"])
                             filteredAerials.append(a)
 
-    ic(filteredAerials[0])
+    if choice == "1":
+        ic(filteredAerials[0])
 
-    def aerial_name(aerial):
-        return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
+        def aerial_name(aerial):
+            return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
 
-    # Create a generator function to yield the aerial names
-    def aerial_generator():
-        for aerial in filteredAerials:
-            yield aerial_name(aerial)
+        # Create a generator function to yield the aerial names
+        def aerial_generator():
+            for aerial in filteredAerials:
+                yield aerial_name(aerial)
 
-    # Use iterfzf to allow the user to filter the aerials
-    selected_aerials = iterfzf(
-        aerial_generator(),
-        multi=True,
-    )
+        # Use iterfzf to allow the user to filter the aerials
+        selected_aerials = iterfzf(
+            aerial_generator(),
+            multi=True,
+        )
 
-    # Filter filteredAerials based on the user's selection
-    filteredAerials = [
-        aerial for aerial in filteredAerials if aerial_name(aerial) in selected_aerials
-    ]
+        # Filter filteredAerials based on the user's selection
+        filteredAerials = [
+            aerial for aerial in filteredAerials if aerial_name(aerial) in selected_aerials
+        ]
 
     print("Downloading " + str(len(filteredAerials)) + " aerials")
 
