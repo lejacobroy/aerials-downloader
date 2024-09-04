@@ -9,20 +9,10 @@ import os.path
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-
 from requests.exceptions import ChunkedEncodingError
 from urllib3.exceptions import ProtocolError
 
 urllib3.disable_warnings()
-
-try:
-    #: used for printing diagnostic messages
-    from icecream import ic, colorize as ic_colorize
-
-    ic.configureOutput(outputFunction=lambda s: print(ic_colorize(s)))
-except ImportError:
-    #: Graceful fallback if Icecream isn't installed.
-    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)
 
 json_file_path = (
     "/Library/Application Support/com.apple.idleassetsd/Customer/entries.json"
@@ -99,9 +89,6 @@ def downloadAerialsParallel(aerial, max_retry = 5):
             except Exception as e:
                 print(f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. {repr(e)}")
 
-
-
-
 def isFileComplete(file_path, url):
     if os.path.exists(file_path):
         local_size = os.path.getsize(file_path)
@@ -110,38 +97,6 @@ def isFileComplete(file_path, url):
         )
         return local_size == remote_size
     return False
-
-
-def downloadAerial(url: str, file_path: str, name: str):
-    resume_byte_position = 0
-    if os.path.exists(file_path):
-        resume_byte_position = os.path.getsize(file_path)
-
-    with open(file_path, "ab") as f:
-        with requests.get(
-            url,
-            stream=True,
-            verify=False,
-            headers={"Range": f"bytes={resume_byte_position}-"},
-        ) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("content-length", 0)) + resume_byte_position
-
-            # tqdm has many interesting parameters. Feel free to experiment!
-            tqdm_params = {
-                "desc": name,
-                "total": total,
-                "miniters": 1,
-                "unit": "B",
-                "unit_scale": True,
-                "unit_divisor": 1024,
-                "initial": resume_byte_position,
-            }
-            with tqdm.tqdm(**tqdm_params) as pb:
-                for chunk in r.iter_content(chunk_size=8192):
-                    pb.update(len(chunk))
-                    f.write(chunk)
-
 
 def chooseCategory():
     chosen_category_obj = {}
@@ -274,12 +229,11 @@ def downloadFilteredAerials(aerials):
 
 def startDownloadOfAerialsList(list):
     print("Downloading " + str(len(list)) + " aerials")
-
     # Get the number of download threads from the environment variable
     download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
     max_retry = 5
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(downloadAerialsParallel, startDownloadOfAerialsList, [max_retry]*len(list))
+        executor.map(downloadAerialsParallel, list, [max_retry]*len(list))
 
 def chooseAerials():
     print("Select an option:")
