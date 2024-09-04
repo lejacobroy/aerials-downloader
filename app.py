@@ -1,5 +1,6 @@
 from iterfzf import iterfzf
 import json
+from itertools import zip_longest
 import requests
 import tqdm
 import urllib3
@@ -8,6 +9,9 @@ import os.path
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+
+from requests.exceptions import ChunkedEncodingError
+from urllib3.exceptions import ProtocolError
 
 urllib3.disable_warnings()
 
@@ -37,6 +41,27 @@ def getAerials(path):
     return aerialsList
 
 
+def downloadAerial(url: str, file_path: str, name: str, resume_pos: int = 0):
+    r = requests.head(url, verify=False)
+    total = int(r.headers.get("content-length", 0))
+    with requests.get(url, stream=True, headers={"Range": f"bytes={resume_pos}-"}, verify=False) as r:
+        r.raise_for_status()
+
+        with open(file_path, "wb" if resume_pos == 0 else "ab") as f:
+            with tqdm.tqdm(
+                desc=name,
+                total=total,
+                miniters=1,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                initial=resume_pos,
+            ) as pb:
+                for chunk in r.iter_content(chunk_size=32 * 1024):
+                    f.write(chunk)
+                    pb.update(len(chunk))
+
+
 def updateSQL():
     con = sqlite3.connect(
         "/Library/Application Support/com.apple.idleassetsd/Aerial.sqlite"
@@ -49,17 +74,32 @@ def updateSQL():
 
 
 def killService():
-    # idleassetsd
+    #idleassetsd
     subprocess.run(["killall", "idleassetsd"])
 
+def downloadAerialsParallel(aerial, max_retry = 5):
+    if 'url-4K-SDR-240FPS' in aerial:
+        url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
+        file_path = aerial_folder_path + aerial["id"] + '.mov'
+        is_download_complete = os.path.exists(file_path)
+        retry = 0
+        while not is_download_complete and retry < max_retry:
+            try:
+                resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(file_path + ".downloading") else 0
+                downloadAerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov", resume_pos=resume_pos)
+                os.rename(file_path + ".downloading", file_path)
+                is_download_complete = True
+            except ChunkedEncodingError | ProtocolError as e:
+                retry += 1
+                if retry >= 5:
+                    print(
+                        f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. "
+                        f"Maximum retries reached. {repr(e)}."
+                    )
+            except Exception as e:
+                print(f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. {repr(e)}")
 
-def downloadAerialsParallel(aerial):
-    if "url-4K-SDR-240FPS" in aerial:
-        url = aerial["url-4K-SDR-240FPS"].replace("\\", "")
-        file_path = aerial_folder_path + aerial["id"] + ".mov"
-        if not os.path.exists(file_path) or not isFileComplete(file_path, url):
-            print("Downloading " + aerial["accessibilityLabel"])
-            downloadAerial(url, file_path, aerial["accessibilityLabel"])
+
 
 
 def isFileComplete(file_path, url):
@@ -144,22 +184,14 @@ def chooseSubcategory(categoryObj):
         subcategories = []
         j = 0
         # Print subcategories
-        print(
-            "Select a subcategory in "
-            + categoryObj["localizedNameKey"].replace("AerialCategory", "")
-            + ":"
-        )
-        for subcat in categoryObj["subcategories"]:
-            j = j + 1
-            print(
-                str(j)
-                + ". "
-                + subcat["localizedNameKey"].replace("AerialSubcategory", "")
-            )
-            subcategories.append(subcat["localizedNameKey"])
+        print("Select a subcategory in "+categoryObj['localizedNameKey'].replace('AerialCategory', '')+":")
+        for subcat in categoryObj['subcategories']:
+            j=j+1
+            print(str(j)+'. '+subcat['localizedNameKey'].replace('AerialSubcategory', ''))
+            subcategories.append(subcat['localizedNameKey'])
 
-        subcategories.append("All")
-        print(str(j + 1) + ". All")
+        subcategories.append('All')
+        print(str(j+1)+'. All')
 
         choice = input("Enter subcategory number: ")
         chosen_subcategory = subcategories[int(choice) - 1]
@@ -245,9 +277,9 @@ def startDownloadOfAerialsList(list):
 
     # Get the number of download threads from the environment variable
     download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
-
+    max_retry = 5
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(downloadAerialsParallel, list)
+        executor.map(downloadAerialsParallel, startDownloadOfAerialsList, [max_retry]*len(list))
 
 def chooseAerials():
     print("Select an option:")
