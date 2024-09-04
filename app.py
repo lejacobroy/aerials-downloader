@@ -171,71 +171,98 @@ def chooseSubcategory(categoryObj):
                     break
     return chosen_subcategory_obj
 
-def chooseAerials():
-    categoryObj = {}
-    subcategoryObj = {}
-
-    print("Select an option:")
-    print("1. Choose aerials manually")
-    print("2. Download all aerials")
-    choice = input("Enter option number: ")
-
-    if choice == "1":
-        categoryObj = chooseCategory()
-        if categoryObj != {}:
-            subcategoryObj = chooseSubcategory(categoryObj)
-
-    aerials = getAerials(json_file_path)
-
+def downloadAllAerials(aerials):
     filteredAerials = []
     aerials_set = set()
+    # formet the list of all aerials urls
+    for a in aerials:
+        if a["id"] not in aerials_set:
+            aerials_set.add(a["id"])
+            filteredAerials.append(a)
+        else:
+            for cat in a["categories"]:
+                if a["id"] not in aerials_set:
+                    aerials_set.add(a["id"])
+                    filteredAerials.append(a)
+            for sub in a["subcategories"]:
+                if a["id"] not in aerials_set:
+                    aerials_set.add(a["id"])
+                    filteredAerials.append(a)
+    startDownloadOfAerialsList(filteredAerials)
+
+def downloadFilteredAerials(aerials):
+    categoryObj = {}
+    subcategoryObj = {}
+    filteredAerials = []
+    aerials_set = set()
+    
+    categoryObj = chooseCategory()
+    if categoryObj != {}:
+        subcategoryObj = chooseSubcategory(categoryObj)
+            
     for a in aerials:
         if categoryObj == {}:
             if a["id"] not in aerials_set:
                 aerials_set.add(a["id"])
                 filteredAerials.append(a)
         else:
-            for cat in a["categories"]:
-                if cat == categoryObj["id"]:
-                    if a["id"] not in aerials_set:
-                        aerials_set.add(a["id"])
-                        filteredAerials.append(a)
             if subcategoryObj != {}:
                 for sub in a["subcategories"]:
                     if sub == subcategoryObj["id"]:
                         if a["id"] not in aerials_set:
                             aerials_set.add(a["id"])
                             filteredAerials.append(a)
+            else:
+                for cat in a["categories"]:
+                    if cat == categoryObj["id"]:
+                        if a["id"] not in aerials_set:
+                            aerials_set.add(a["id"])
+                            filteredAerials.append(a)
+                            
+    def aerial_name(aerial):
+        return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
 
-    if choice == "1":
-        ic(filteredAerials[0])
+    # Create a generator function to yield the aerial names
+    def aerial_generator():
+        for aerial in filteredAerials:
+            yield aerial_name(aerial)
 
-        def aerial_name(aerial):
-            return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
+    # Use iterfzf to allow the user to filter the aerials
+    selected_aerials = iterfzf(
+        aerial_generator(),
+        multi=True,
+    )
 
-        # Create a generator function to yield the aerial names
-        def aerial_generator():
-            for aerial in filteredAerials:
-                yield aerial_name(aerial)
+    # Filter filteredAerials based on the user's selection
+    filteredAerials = [
+        aerial for aerial in filteredAerials if aerial_name(aerial) in selected_aerials
+    ]
+    
+    startDownloadOfAerialsList(filteredAerials)
 
-        # Use iterfzf to allow the user to filter the aerials
-        selected_aerials = iterfzf(
-            aerial_generator(),
-            multi=True,
-        )
-
-        # Filter filteredAerials based on the user's selection
-        filteredAerials = [
-            aerial for aerial in filteredAerials if aerial_name(aerial) in selected_aerials
-        ]
-
-    print("Downloading " + str(len(filteredAerials)) + " aerials")
+def startDownloadOfAerialsList(list):
+    print("Downloading " + str(len(list)) + " aerials")
 
     # Get the number of download threads from the environment variable
     download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
 
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(downloadAerialsParallel, filteredAerials)
+        executor.map(downloadAerialsParallel, list)
+
+def chooseAerials():
+    print("Select an option:")
+    print("1. Choose aerials manually")
+    print("2. Download all aerials")
+    choice = input("Enter option number: ")
+    
+    aerials = getAerials(json_file_path)
+    
+    if choice == "2":
+        # formet the list of all aerials urls
+        downloadAllAerials(aerials)
+
+    if choice == "1":
+        downloadFilteredAerials(aerials)
 
 
 print("Loading Aerials list")
