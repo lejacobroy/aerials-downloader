@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from requests.exceptions import ChunkedEncodingError
 from urllib3.exceptions import ProtocolError
 
+
 urllib3.disable_warnings()
 
 json_file_path = (
