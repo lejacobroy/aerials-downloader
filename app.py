@@ -1,7 +1,6 @@
 from iterfzf import iterfzf
 import json
 from itertools import zip_longest
-
 import requests
 import tqdm
 import urllib3
@@ -10,18 +9,11 @@ import os.path
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from requests.exceptions import ChunkedEncodingError
+from urllib3.exceptions import ProtocolError
 
 
 urllib3.disable_warnings()
-
-try:
-    #: used for printing diagnostic messages
-    from icecream import ic, colorize as ic_colorize
-
-    ic.configureOutput(outputFunction=lambda s: print(ic_colorize(s)))
-except ImportError:
-    #: Graceful fallback if Icecream isn't installed.
-    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)
 
 json_file_path = (
     "/Library/Application Support/com.apple.idleassetsd/Customer/entries.json"
@@ -40,6 +32,26 @@ def getAerials(path):
     return aerialsList
 
 
+def downloadAerial(url: str, file_path: str, name: str, resume_pos: int = 0):
+    r = requests.head(url, verify=False)
+    total = int(r.headers.get("content-length", 0))
+    with requests.get(url, stream=True, headers={"Range": f"bytes={resume_pos}-"}, verify=False) as r:
+        r.raise_for_status()
+
+        with open(file_path, "wb" if resume_pos == 0 else "ab") as f:
+            with tqdm.tqdm(
+                desc=name,
+                total=total,
+                miniters=1,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                initial=resume_pos,
+            ) as pb:
+                for chunk in r.iter_content(chunk_size=32 * 1024):
+                    f.write(chunk)
+                    pb.update(len(chunk))
+
 
 def updateSQL():
     con = sqlite3.connect(
@@ -53,18 +65,30 @@ def updateSQL():
 
 
 def killService():
-    # idleassetsd
+    #idleassetsd
     subprocess.run(["killall", "idleassetsd"])
 
-
-def downloadAerialsParallel(aerial):
-    if "url-4K-SDR-240FPS" in aerial:
-        url = aerial["url-4K-SDR-240FPS"].replace("\\", "")
-        file_path = aerial_folder_path + aerial["id"] + ".mov"
-        if not os.path.exists(file_path) or not isFileComplete(file_path, url):
-            print("Downloading " + aerial["accessibilityLabel"])
-            downloadAerial(url, file_path, aerial["accessibilityLabel"])
-
+def downloadAerialsParallel(aerial, max_retry = 5):
+    if 'url-4K-SDR-240FPS' in aerial:
+        url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
+        file_path = aerial_folder_path + aerial["id"] + '.mov'
+        is_download_complete = os.path.exists(file_path)
+        retry = 0
+        while not is_download_complete and retry < max_retry:
+            try:
+                resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(file_path + ".downloading") else 0
+                downloadAerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov", resume_pos=resume_pos)
+                os.rename(file_path + ".downloading", file_path)
+                is_download_complete = True
+            except ChunkedEncodingError | ProtocolError as e:
+                retry += 1
+                if retry >= 5:
+                    print(
+                        f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. "
+                        f"Maximum retries reached. {repr(e)}."
+                    )
+            except Exception as e:
+                print(f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. {repr(e)}")
 
 def isFileComplete(file_path, url):
     if os.path.exists(file_path):
@@ -74,38 +98,6 @@ def isFileComplete(file_path, url):
         )
         return local_size == remote_size
     return False
-
-
-def downloadAerial(url: str, file_path: str, name: str):
-    resume_byte_position = 0
-    if os.path.exists(file_path):
-        resume_byte_position = os.path.getsize(file_path)
-
-    with open(file_path, "ab") as f:
-        with requests.get(
-            url,
-            stream=True,
-            verify=False,
-            headers={"Range": f"bytes={resume_byte_position}-"},
-        ) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("content-length", 0)) + resume_byte_position
-
-            # tqdm has many interesting parameters. Feel free to experiment!
-            tqdm_params = {
-                "desc": name,
-                "total": total,
-                "miniters": 1,
-                "unit": "B",
-                "unit_scale": True,
-                "unit_divisor": 1024,
-                "initial": resume_byte_position,
-            }
-            with tqdm.tqdm(**tqdm_params) as pb:
-                for chunk in r.iter_content(chunk_size=8192):
-                    pb.update(len(chunk))
-                    f.write(chunk)
-
 
 def chooseCategory():
     chosen_category_obj = {}
@@ -167,49 +159,97 @@ def chooseSubcategory(categoryObj):
                     break
     return chosen_subcategory_obj
 
-def chooseAerials():
-    categoryObj = {}
-    subcategoryObj = {}
-
-    print("Select an option:")
-    print("1. Choose aerials manually")
-    print("2. Download all aerials")
-    choice = input("Enter option number: ")
-
-    if choice == "1":
-        categoryObj = chooseCategory()
-        if categoryObj != {}:
-            subcategoryObj = chooseSubcategory(categoryObj)
-
-    aerials = getAerials(json_file_path)
-
+def downloadAllAerials(aerials):
     filteredAerials = []
     aerials_set = set()
+    # formet the list of all aerials urls
+    for a in aerials:
+        if a["id"] not in aerials_set:
+            aerials_set.add(a["id"])
+            filteredAerials.append(a)
+        else:
+            for cat in a["categories"]:
+                if a["id"] not in aerials_set:
+                    aerials_set.add(a["id"])
+                    filteredAerials.append(a)
+            for sub in a["subcategories"]:
+                if a["id"] not in aerials_set:
+                    aerials_set.add(a["id"])
+                    filteredAerials.append(a)
+    startDownloadOfAerialsList(filteredAerials)
+
+def downloadFilteredAerials(aerials):
+    categoryObj = {}
+    subcategoryObj = {}
+    filteredAerials = []
+    aerials_set = set()
+    
+    categoryObj = chooseCategory()
+    if categoryObj != {}:
+        subcategoryObj = chooseSubcategory(categoryObj)
+            
     for a in aerials:
         if categoryObj == {}:
             if a["id"] not in aerials_set:
                 aerials_set.add(a["id"])
                 filteredAerials.append(a)
         else:
-            for cat in a["categories"]:
-                if cat == categoryObj["id"]:
-                    if a["id"] not in aerials_set:
-                        aerials_set.add(a["id"])
-                        filteredAerials.append(a)
             if subcategoryObj != {}:
                 for sub in a["subcategories"]:
                     if sub == subcategoryObj["id"]:
                         if a["id"] not in aerials_set:
                             aerials_set.add(a["id"])
                             filteredAerials.append(a)
+            else:
+                for cat in a["categories"]:
+                    if cat == categoryObj["id"]:
+                        if a["id"] not in aerials_set:
+                            aerials_set.add(a["id"])
+                            filteredAerials.append(a)
+                            
+    def aerial_name(aerial):
+        return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
 
-    print("Downloading "+str(len(filteredAerials))+" aerials")
+    # Create a generator function to yield the aerial names
+    def aerial_generator():
+        for aerial in filteredAerials:
+            yield aerial_name(aerial)
 
+    # Use iterfzf to allow the user to filter the aerials
+    selected_aerials = iterfzf(
+        aerial_generator(),
+        multi=True,
+    )
+
+    # Filter filteredAerials based on the user's selection
+    filteredAerials = [
+        aerial for aerial in filteredAerials if aerial_name(aerial) in selected_aerials
+    ]
+    
+    startDownloadOfAerialsList(filteredAerials)
+
+def startDownloadOfAerialsList(list):
+    print("Downloading " + str(len(list)) + " aerials")
     # Get the number of download threads from the environment variable
-    download_threads = int(os.environ.get('DOWNLOAD_THREADS', 1))
+    download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
     max_retry = 5
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(downloadAerialsParallel, filteredAerials, [max_retry]*len(filteredAerials))
+        executor.map(downloadAerialsParallel, list, [max_retry]*len(list))
+
+def chooseAerials():
+    print("Select an option:")
+    print("1. Choose aerials manually")
+    print("2. Download all aerials")
+    choice = input("Enter option number: ")
+    
+    aerials = getAerials(json_file_path)
+    
+    if choice == "2":
+        # formet the list of all aerials urls
+        downloadAllAerials(aerials)
+
+    if choice == "1":
+        downloadFilteredAerials(aerials)
 
 
 print("Loading Aerials list")
