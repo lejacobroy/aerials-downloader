@@ -24,3 +24,6 @@ For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
 - [shinz4u](https://github.com/shinz4u)
 - [shawncl](https://github.com/shawncl)
 - [ismael-marcos](https://github.com/ismael-marcos)
+- [skywinder](https://github.com/skywinder)
+- [CoreJa](https://github.com/CoreJa)
+- [NightMAchinery](https://github.com/NightMachinery)
