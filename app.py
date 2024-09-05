@@ -1,3 +1,4 @@
+from iterfzf import iterfzf
 import json
 from itertools import zip_longest
 
@@ -10,13 +11,25 @@ import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-from requests.exceptions import ChunkedEncodingError
-from urllib3.exceptions import ProtocolError
 
 urllib3.disable_warnings()
 
-json_file_path='/Library/Application Support/com.apple.idleassetsd/Customer/entries.json'
-aerial_folder_path='/Library/Application Support/com.apple.idleassetsd/Customer/4KSDR240FPS/'
+try:
+    #: used for printing diagnostic messages
+    from icecream import ic, colorize as ic_colorize
+
+    ic.configureOutput(outputFunction=lambda s: print(ic_colorize(s)))
+except ImportError:
+    #: Graceful fallback if Icecream isn't installed.
+    ic = lambda *a: None if not a else (a[0] if len(a) == 1 else a)
+
+json_file_path = (
+    "/Library/Application Support/com.apple.idleassetsd/Customer/entries.json"
+)
+aerial_folder_path = (
+    "/Library/Application Support/com.apple.idleassetsd/Customer/4KSDR240FPS/"
+)
+
 
 def getAerials(path):
     aerialsList = []
@@ -27,61 +40,71 @@ def getAerials(path):
     return aerialsList
 
 
-def downloadAerial(url: str, file_path: str, name: str, resume_pos: int = 0):
-    r = requests.head(url, verify=False)
-    total = int(r.headers.get("content-length", 0))
-    with requests.get(url, stream=True, headers={"Range": f"bytes={resume_pos}-"}, verify=False) as r:
-        r.raise_for_status()
-
-        with open(file_path, "wb" if resume_pos == 0 else "ab") as f:
-            with tqdm.tqdm(
-                desc=name,
-                total=total,
-                miniters=1,
-                unit="B",
-                unit_scale=True,
-                unit_divisor=1024,
-                initial=resume_pos,
-            ) as pb:
-                for chunk in r.iter_content(chunk_size=32 * 1024):
-                    f.write(chunk)
-                    pb.update(len(chunk))
-
 
 def updateSQL():
-    con = sqlite3.connect("/Library/Application Support/com.apple.idleassetsd/Aerial.sqlite")
+    con = sqlite3.connect(
+        "/Library/Application Support/com.apple.idleassetsd/Aerial.sqlite"
+    )
     cur = con.cursor()
     cur.execute("VACUUM;")
     cur.execute("UPDATE ZASSET SET ZLASTDOWNLOADED = 718364962.0204;")
     con.commit()
     con.close()
 
+
 def killService():
-    #idleassetsd
+    # idleassetsd
     subprocess.run(["killall", "idleassetsd"])
 
-def downloadAerialsParallel(aerial, max_retry = 5):
-    if 'url-4K-SDR-240FPS' in aerial:
-        url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
-        file_path = aerial_folder_path + aerial["id"] + '.mov'
-        is_download_complete = os.path.exists(file_path)
-        retry = 0
-        while not is_download_complete and retry < max_retry:
-            try:
-                resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(file_path + ".downloading") else 0
-                downloadAerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov", resume_pos=resume_pos)
-                os.rename(file_path + ".downloading", file_path)
-                is_download_complete = True
-            except ChunkedEncodingError | ProtocolError as e:
-                retry += 1
-                if retry >= 5:
-                    print(
-                        f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. "
-                        f"Maximum retries reached. {repr(e)}."
-                    )
-            except Exception as e:
-                print(f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. {repr(e)}")
 
+def downloadAerialsParallel(aerial):
+    if "url-4K-SDR-240FPS" in aerial:
+        url = aerial["url-4K-SDR-240FPS"].replace("\\", "")
+        file_path = aerial_folder_path + aerial["id"] + ".mov"
+        if not os.path.exists(file_path) or not isFileComplete(file_path, url):
+            print("Downloading " + aerial["accessibilityLabel"])
+            downloadAerial(url, file_path, aerial["accessibilityLabel"])
+
+
+def isFileComplete(file_path, url):
+    if os.path.exists(file_path):
+        local_size = os.path.getsize(file_path)
+        remote_size = int(
+            requests.head(url, verify=False).headers.get("content-length", 0)
+        )
+        return local_size == remote_size
+    return False
+
+
+def downloadAerial(url: str, file_path: str, name: str):
+    resume_byte_position = 0
+    if os.path.exists(file_path):
+        resume_byte_position = os.path.getsize(file_path)
+
+    with open(file_path, "ab") as f:
+        with requests.get(
+            url,
+            stream=True,
+            verify=False,
+            headers={"Range": f"bytes={resume_byte_position}-"},
+        ) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length", 0)) + resume_byte_position
+
+            # tqdm has many interesting parameters. Feel free to experiment!
+            tqdm_params = {
+                "desc": name,
+                "total": total,
+                "miniters": 1,
+                "unit": "B",
+                "unit_scale": True,
+                "unit_divisor": 1024,
+                "initial": resume_byte_position,
+            }
+            with tqdm.tqdm(**tqdm_params) as pb:
+                for chunk in r.iter_content(chunk_size=8192):
+                    pb.update(len(chunk))
+                    f.write(chunk)
 
 
 def chooseCategory():
@@ -94,23 +117,28 @@ def chooseCategory():
 
         categories = []
         i = 0
-        for category in data['categories']:
-            i=i+1
-            print(str(i)+'. '+category['localizedNameKey'].replace('AerialCategory', ''))
-            categories.append(category['localizedNameKey'])
+        for category in data["categories"]:
+            i = i + 1
+            print(
+                str(i)
+                + ". "
+                + category["localizedNameKey"].replace("AerialCategory", "")
+            )
+            categories.append(category["localizedNameKey"])
 
-        categories.append('All')
-        print(str(i+1)+'. All')
+        categories.append("All")
+        print(str(i + 1) + ". All")
 
         choice = input("Enter category number: ")
-        chosen_category = categories[int(choice)-1]
-        if chosen_category != 'All':
+        chosen_category = categories[int(choice) - 1]
+        if chosen_category != "All":
             chosen_category_obj = {}
-            for category in data['categories']:
-                if category['localizedNameKey'] == chosen_category:
+            for category in data["categories"]:
+                if category["localizedNameKey"] == chosen_category:
                     chosen_category_obj = category
                     break
     return chosen_category_obj
+
 
 def chooseSubcategory(categoryObj):
     chosen_subcategory_obj = {}
@@ -130,23 +158,28 @@ def chooseSubcategory(categoryObj):
         print(str(j+1)+'. All')
 
         choice = input("Enter subcategory number: ")
-        chosen_subcategory = subcategories[int(choice)-1]
-        if chosen_subcategory != 'All':
+        chosen_subcategory = subcategories[int(choice) - 1]
+        if chosen_subcategory != "All":
             chosen_subcategory_obj = {}
-            for subcat in categoryObj['subcategories']:
-                if subcat['localizedNameKey'] == chosen_subcategory:
+            for subcat in categoryObj["subcategories"]:
+                if subcat["localizedNameKey"] == chosen_subcategory:
                     chosen_subcategory_obj = subcat
                     break
     return chosen_subcategory_obj
-
 
 def chooseAerials():
     categoryObj = {}
     subcategoryObj = {}
 
-    categoryObj = chooseCategory()
-    if categoryObj!= {}:
-        subcategoryObj = chooseSubcategory(categoryObj)
+    print("Select an option:")
+    print("1. Choose aerials manually")
+    print("2. Download all aerials")
+    choice = input("Enter option number: ")
+
+    if choice == "1":
+        categoryObj = chooseCategory()
+        if categoryObj != {}:
+            subcategoryObj = chooseSubcategory(categoryObj)
 
     aerials = getAerials(json_file_path)
 
@@ -154,20 +187,20 @@ def chooseAerials():
     aerials_set = set()
     for a in aerials:
         if categoryObj == {}:
-            if a['id'] not in aerials_set:
-                aerials_set.add(a['id'])
+            if a["id"] not in aerials_set:
+                aerials_set.add(a["id"])
                 filteredAerials.append(a)
         else:
             for cat in a["categories"]:
-                if cat == categoryObj['id']:
-                    if a['id'] not in aerials_set:
-                        aerials_set.add(a['id'])
+                if cat == categoryObj["id"]:
+                    if a["id"] not in aerials_set:
+                        aerials_set.add(a["id"])
                         filteredAerials.append(a)
-            if subcategoryObj!= {}:
+            if subcategoryObj != {}:
                 for sub in a["subcategories"]:
-                    if sub == subcategoryObj['id']:
-                        if a['id'] not in aerials_set:
-                            aerials_set.add(a['id'])
+                    if sub == subcategoryObj["id"]:
+                        if a["id"] not in aerials_set:
+                            aerials_set.add(a["id"])
                             filteredAerials.append(a)
 
     print("Downloading "+str(len(filteredAerials))+" aerials")

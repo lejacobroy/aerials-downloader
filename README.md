@@ -1,6 +1,6 @@
 # aerials-downloader
 
-This little python snippet allows you to download all the new Sonoma Aerials so they are available to shuffle.
+This little python snippet allows you to download all the new MacOS Sonoma Aerials screensavers and wallpapers, so they are available to shuffle.
 
 You can also select Categories and Subcategories of video to download, and download them in parallel.
 
