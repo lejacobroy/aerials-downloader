@@ -1,5 +1,7 @@
 from iterfzf import iterfzf
 import json
+from itertools import zip_longest
+
 import requests
 import tqdm
 import urllib3
@@ -8,6 +10,7 @@ import os.path
 import sqlite3
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+
 
 urllib3.disable_warnings()
 
@@ -35,6 +38,7 @@ def getAerials(path):
         for aerial in d["assets"]:
             aerialsList.append(aerial)
     return aerialsList
+
 
 
 def updateSQL():
@@ -144,22 +148,14 @@ def chooseSubcategory(categoryObj):
         subcategories = []
         j = 0
         # Print subcategories
-        print(
-            "Select a subcategory in "
-            + categoryObj["localizedNameKey"].replace("AerialCategory", "")
-            + ":"
-        )
-        for subcat in categoryObj["subcategories"]:
-            j = j + 1
-            print(
-                str(j)
-                + ". "
-                + subcat["localizedNameKey"].replace("AerialSubcategory", "")
-            )
-            subcategories.append(subcat["localizedNameKey"])
+        print("Select a subcategory in "+categoryObj['localizedNameKey'].replace('AerialCategory', '')+":")
+        for subcat in categoryObj['subcategories']:
+            j=j+1
+            print(str(j)+'. '+subcat['localizedNameKey'].replace('AerialSubcategory', ''))
+            subcategories.append(subcat['localizedNameKey'])
 
-        subcategories.append("All")
-        print(str(j + 1) + ". All")
+        subcategories.append('All')
+        print(str(j+1)+'. All')
 
         choice = input("Enter subcategory number: ")
         chosen_subcategory = subcategories[int(choice) - 1]
@@ -207,35 +203,13 @@ def chooseAerials():
                             aerials_set.add(a["id"])
                             filteredAerials.append(a)
 
-    if choice == "1":
-        ic(filteredAerials[0])
-
-        def aerial_name(aerial):
-            return f"""{aerial['accessibilityLabel']} ({aerial['localizedNameKey']})"""
-
-        # Create a generator function to yield the aerial names
-        def aerial_generator():
-            for aerial in filteredAerials:
-                yield aerial_name(aerial)
-
-        # Use iterfzf to allow the user to filter the aerials
-        selected_aerials = iterfzf(
-            aerial_generator(),
-            multi=True,
-        )
-
-        # Filter filteredAerials based on the user's selection
-        filteredAerials = [
-            aerial for aerial in filteredAerials if aerial_name(aerial) in selected_aerials
-        ]
-
-    print("Downloading " + str(len(filteredAerials)) + " aerials")
+    print("Downloading "+str(len(filteredAerials))+" aerials")
 
     # Get the number of download threads from the environment variable
-    download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
-
+    download_threads = int(os.environ.get('DOWNLOAD_THREADS', 1))
+    max_retry = 5
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(downloadAerialsParallel, filteredAerials)
+        executor.map(downloadAerialsParallel, filteredAerials, [max_retry]*len(filteredAerials))
 
 
 print("Loading Aerials list")
