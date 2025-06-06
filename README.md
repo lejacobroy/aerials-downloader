@@ -16,6 +16,8 @@ Optional: to download more than one in parallel update the environment variable 
 
 For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
 
+Note: If you're choosing aerials manually, you can select multiple aerials with tab/shift+tab.
+
 ## screenshot
 ![Alt text](/aerials-downloader.png?raw=true "aerials-downloader")
 
