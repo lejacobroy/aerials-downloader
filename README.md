@@ -12,6 +12,9 @@ To use:
 - `pip3 install -r requirements.txt`
 - `sudo python3 app.py`
 
+> [!NOTE]
+> For macOS Tahoe (26+) you should run `sudo python3 app-tahoe.py`
+
 Optional: to download more than one in parallel update the environment variable DOWNLOAD_THREADS.
 
 For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
