@@ -1,6 +1,6 @@
 # aerials-downloader
 
-This little python snippet allows you to download all the new MacOS Sonoma Aerials screensavers and wallpapers, so they are available to shuffle.
+This little python snippet allows you to download all the new macOS Aerials screensavers and wallpapers, so they are available to shuffle.
 
 You can also select Categories and Subcategories of video to download, and download them in parallel.
 
@@ -10,11 +10,15 @@ To use:
 
 - Clone the repository
 - `pip3 install -r requirements.txt`
-- `sudo python3 app.py`
+- Run the script:
+  - **Legacy macOS (Sonoma–Sequoia):** `sudo python3 app.py`
+  - **Tahoe (macOS 26) or newer:** `python3 app.py` (**no** sudo)
 
 Optional: to download more than one in parallel update the environment variable DOWNLOAD_THREADS.
 
-For example to set to five: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
+For example to set to five:
+- Legacy: `sudo -E DOWNLOAD_THREADS=5 python3 app.py`
+- Tahoe:  `DOWNLOAD_THREADS=5 python3 app.py`
 
 Note: If you're choosing aerials manually, you can select multiple aerials with tab/shift+tab.
 
@@ -29,3 +33,4 @@ Note: If you're choosing aerials manually, you can select multiple aerials with 
 - [skywinder](https://github.com/skywinder)
 - [CoreJa](https://github.com/CoreJa)
 - [NightMAchinery](https://github.com/NightMachinery)
+- [foxhatleo](https://github.com/foxhatleo)

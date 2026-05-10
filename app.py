@@ -10,6 +10,7 @@ import os
 import os.path
 import sqlite3
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from requests.exceptions import ChunkedEncodingError
 from urllib3.exceptions import ProtocolError
@@ -18,13 +19,41 @@ from urllib3.exceptions import ProtocolError
 urllib3.disable_warnings()
 
 # CONSTANTS
-JSON_FILE_PATH = (
+LEGACY_JSON_FILE_PATH = (
     "/Library/Application Support/com.apple.idleassetsd/Customer/entries.json"
 )
-AERIAL_FOLDER_PATH = (
+LEGACY_AERIAL_FOLDER_PATH = (
     "/Library/Application Support/com.apple.idleassetsd/Customer/4KSDR240FPS/"
 )
+TAHOE_JSON_FILE_PATH = os.path.expanduser(
+    "~/Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json"
+)
+TAHOE_AERIAL_FOLDER_PATH = os.path.expanduser(
+    "~/Library/Application Support/com.apple.wallpaper/aerials/videos/"
+)
+
+# Tahoe (macOS 26+) moved aerials out of /Library/.../idleassetsd into ~/Library/.../wallpaper.
+# Detect by presence of the legacy entries.json — it does not exist on Tahoe or newer.
+IS_LEGACY = os.path.exists(LEGACY_JSON_FILE_PATH)
+JSON_FILE_PATH = LEGACY_JSON_FILE_PATH if IS_LEGACY else TAHOE_JSON_FILE_PATH
+AERIAL_FOLDER_PATH = LEGACY_AERIAL_FOLDER_PATH if IS_LEGACY else TAHOE_AERIAL_FOLDER_PATH
+
 QUERY = "UPDATE ZASSET SET ZLASTDOWNLOADED = 718364962.0204;"  # noqa ~ Ignores styling warnings
+
+
+def check_permissions():
+    """
+    Enforce the correct invocation for the detected macOS variant.
+    Legacy writes to /Library and requires sudo. Tahoe writes to ~/Library
+    and must NOT use sudo (would download as root into the user's home).
+    """
+    is_root = os.geteuid() == 0
+    if IS_LEGACY and not is_root:
+        print("Legacy macOS detected: must run with sudo.")
+        sys.exit(1)
+    if not IS_LEGACY and is_root:
+        print("Tahoe or newer detected: do NOT run with sudo.")
+        sys.exit(1)
 
 
 def get_aerials(path):
@@ -382,9 +411,11 @@ def choose_aerials():
         download_filtered_aerials(aerials)
 
 
-print("Loading Aerials list")
+check_permissions()
+print(f"Loading Aerials list{' (pre-Tahoe)' if IS_LEGACY else ''}")
 choose_aerials()
-print("Updating Aerials Database")
-update_sql()
-print("Restarting service")
-kill_service()
+if IS_LEGACY:
+    print("Updating Aerials Database")
+    update_sql()
+    print("Restarting service")
+    kill_service()
