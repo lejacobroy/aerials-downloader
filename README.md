@@ -22,6 +22,8 @@ For example to set to five:
 
 Note: If you're choosing aerials manually, you can select multiple aerials with tab/shift+tab.
 
+Note (Tahoe 26+): after the download finishes, close and reopen System Settings > Wallpaper (or Screen Saver) for the newly downloaded aerials to appear.
+
 ## screenshot
 ![Alt text](/aerials-downloader.png?raw=true "aerials-downloader")
 

@@ -381,6 +381,10 @@ def start_download_of_aerials_list(_list: List[Dict]):
     """
     print("Downloading " + str(len(_list)) + " aerials")
 
+    # Ensure the destination folder exists (it may be absent on a fresh install
+    # where the user has not yet opened Wallpaper settings).
+    os.makedirs(AERIAL_FOLDER_PATH, exist_ok=True)
+
     # Get the number of download threads from the environment variable
     download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
 
@@ -419,3 +423,8 @@ if IS_LEGACY:
     update_sql()
     print("Restarting service")
     kill_service()
+else:
+    print(
+        "Done. On Tahoe, close and reopen System Settings > Wallpaper "
+        "(or Screen Saver) for the new aerials to appear."
+    )
