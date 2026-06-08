@@ -1,4 +1,0 @@
-Requests==2.31.0
-tqdm==4.65.0
-urllib3==1.26.15
-iterfzf==1.4.0.54.3
