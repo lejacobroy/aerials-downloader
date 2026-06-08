@@ -9,6 +9,7 @@ import os.path
 import sqlite3
 import subprocess
 import sys
+import truststore
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.exceptions import ChunkedEncodingError
 from urllib3.exceptions import ProtocolError
@@ -452,6 +453,10 @@ def choose_aerials(data):
 
 def main():
     """Entry point: load the manifest, prompt, download, then refresh macOS."""
+    # Verify TLS against the OS trust store (macOS Keychain) so downloads work
+    # behind corporate/VPN TLS-inspection proxies whose root CA is trusted by
+    # the system but not bundled in certifi — without disabling verification.
+    truststore.inject_into_ssl()
     check_permissions()
     print(f"Loading Aerials list{' (pre-Tahoe)' if IS_LEGACY else ''}")
     data = load_manifest(JSON_FILE_PATH)

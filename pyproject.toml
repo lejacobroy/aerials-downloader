@@ -3,12 +3,13 @@ name = "aerials-downloader"
 version = "1.0.0"
 description = "Download macOS aerial screensavers and wallpapers in bulk."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31.0",
     "tqdm>=4.65.0",
     "urllib3>=1.26.15",
     "iterfzf>=1.4.0",
+    "truststore>=0.10.0",
 ]
 
 [tool.uv]

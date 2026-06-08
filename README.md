@@ -28,6 +28,8 @@ Note: If you're choosing aerials manually, you can select multiple aerials with 
 
 Note (Tahoe 26+): after the download finishes, close and reopen System Settings > Wallpaper (or Screen Saver) for the newly downloaded aerials to appear.
 
+Note: TLS certificates are verified against your operating system's trust store (via [truststore](https://pypi.org/project/truststore/)), so downloads work behind corporate/VPN TLS-inspection proxies whose root CA is in your system keychain.
+
 ## screenshot
 ![Alt text](/aerials-downloader.png?raw=true "aerials-downloader")
 
