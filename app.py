@@ -2,21 +2,16 @@ from typing import List, Dict
 
 from iterfzf import iterfzf
 import json
-from itertools import zip_longest
 import requests
 import tqdm
-import urllib3
 import os
 import os.path
 import sqlite3
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.exceptions import ChunkedEncodingError
 from urllib3.exceptions import ProtocolError
-
-# Disable warnings
-urllib3.disable_warnings()
 
 # CONSTANTS
 LEGACY_JSON_FILE_PATH = (
@@ -40,6 +35,11 @@ AERIAL_FOLDER_PATH = LEGACY_AERIAL_FOLDER_PATH if IS_LEGACY else TAHOE_AERIAL_FO
 
 QUERY = "UPDATE ZASSET SET ZLASTDOWNLOADED = 718364962.0204;"  # noqa ~ Ignores styling warnings
 
+# Number of bytes to request per streamed chunk.
+CHUNK_SIZE = 32 * 1024
+# Maximum number of attempts per aerial before giving up.
+MAX_RETRY = 5
+
 
 def check_permissions():
     """
@@ -56,21 +56,36 @@ def check_permissions():
         sys.exit(1)
 
 
-def get_aerials(path):
+def load_manifest(path):
     """
-    Get the list of aerial URLs from the aerials JSON file
+    Load and parse the aerials manifest JSON.
     Args:
-        path: Path to aerials JSON file
+        path: Path to the aerials manifest (entries.json)
 
     Returns:
-
+        The parsed manifest as a dict.
     """
-    aerials_list = []
-    with open(path) as f:
-        d = json.load(f)
-        for aerial in d["assets"]:
-            aerials_list.append(aerial)
-    return aerials_list
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(
+            f"Could not find the aerials manifest at:\n  {path}\n"
+            "Open System Settings > Wallpaper once so macOS creates it, "
+            "or this macOS version may not be supported yet."
+        )
+
+
+def get_aerials(data):
+    """
+    Get the list of aerials from a parsed manifest.
+    Args:
+        data: Parsed manifest dict
+
+    Returns:
+        The list of aerial asset objects.
+    """
+    return data["assets"]
 
 
 def download_aerial(url: str, file_path: str, name: str, resume_pos: int = 0):
@@ -86,15 +101,11 @@ def download_aerial(url: str, file_path: str, name: str, resume_pos: int = 0):
         None
 
     """
-    r = requests.head(url, verify=False)  # Send a HEAD request
+    total = int(requests.head(url).headers.get("content-length", 0))
 
-    total = int(r.headers.get("content-length", 0))  # Get the total content length
+    headers = {"Range": f"bytes={resume_pos}-"}
 
-    headers = dict(
-        Range=f"bytes={resume_pos}-"
-    )
-
-    with requests.get(url, stream=True, headers=headers, verify=False) as r:
+    with requests.get(url, stream=True, headers=headers) as r:
         r.raise_for_status()
 
         with open(file_path, "wb" if resume_pos == 0 else "ab") as f:
@@ -108,7 +119,7 @@ def download_aerial(url: str, file_path: str, name: str, resume_pos: int = 0):
                 initial=resume_pos,
             )
             with tqdm.tqdm(**kwargs) as pb:
-                for chunk in r.iter_content(chunk_size=32 * 1024):
+                for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                     f.write(chunk)
                     pb.update(len(chunk))
 
@@ -141,96 +152,92 @@ def kill_service():
     subprocess.run(["killall", "idleassetsd"])
 
 
-def download_aerials_parallel(aerial, max_retry=5):
-    """
-    Download aerials in parallel
-    Args:
-        aerial: Which aerial to download
-        max_retry: Maximum number of retries
-
-    Returns:
-        None
-
-    """
-    if 'url-4K-SDR-240FPS' in aerial:
-        url = aerial["url-4K-SDR-240FPS"].replace('\\', '')
-        file_path = AERIAL_FOLDER_PATH + aerial["id"] + '.mov'
-        is_download_complete = os.path.exists(file_path)
-        retry = 0
-        while not is_download_complete and retry < max_retry:
-            try:
-                resume_pos = os.path.getsize(file_path + ".downloading") if os.path.exists(
-                    file_path + ".downloading") else 0
-                download_aerial(url, file_path + ".downloading", f"{aerial['accessibilityLabel']}: {aerial['id']}.mov",
-                                resume_pos=resume_pos)
-                os.rename(file_path + ".downloading", file_path)
-                is_download_complete = True
-            except ChunkedEncodingError | ProtocolError as e:
-                retry += 1
-                if retry >= 5:
-                    print(
-                        f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. "
-                        f"Maximum retries reached. {repr(e)}."
-                    )
-            except Exception as e:
-                print(f"Error downloading {aerial['accessibilityLabel']}: {aerial['id']}.mov. {repr(e)}")
-
-
 def is_file_complete(file_path, url):
     """
-    Check if the aerial completed downloading
+    Check if the aerial finished downloading by comparing the local file size
+    against the remote content length.
     Args:
         file_path: File path to the aerial
         url: URL for the aerial
 
     Returns:
-        None
+        True if the file exists locally and matches the remote size.
     """
-    if os.path.exists(file_path):
-        local_size = os.path.getsize(file_path)
-        remote_size = int(
-            requests.head(url, verify=False).headers.get("content-length", 0)
-        )
-        return local_size == remote_size
-    return False
+    if not os.path.exists(file_path):
+        return False
+    local_size = os.path.getsize(file_path)
+    remote_size = int(requests.head(url).headers.get("content-length", 0))
+    return local_size == remote_size
 
 
-def choose_category():
+def download_aerials_parallel(aerial, max_retry=MAX_RETRY):
+    """
+    Download a single aerial, resuming and retrying on network errors.
+    Args:
+        aerial: Which aerial to download
+        max_retry: Maximum number of attempts
+
+    Returns:
+        None on success or skip, or an error string describing the failure.
+    """
+    if "url-4K-SDR-240FPS" not in aerial:
+        return None
+
+    url = aerial["url-4K-SDR-240FPS"].replace("\\", "")
+    file_path = AERIAL_FOLDER_PATH + aerial["id"] + ".mov"
+    name = f"{aerial['accessibilityLabel']}: {aerial['id']}.mov"
+
+    # Skip only when the existing file is present AND the correct, complete size.
+    if is_file_complete(file_path, url):
+        return None
+
+    downloading_path = file_path + ".downloading"
+    for attempt in range(1, max_retry + 1):
+        try:
+            resume_pos = (
+                os.path.getsize(downloading_path)
+                if os.path.exists(downloading_path)
+                else 0
+            )
+            download_aerial(url, downloading_path, name, resume_pos=resume_pos)
+            os.rename(downloading_path, file_path)
+            return None
+        except (ChunkedEncodingError, ProtocolError) as e:
+            # Transient network error — loop to resume from where we stopped.
+            if attempt >= max_retry:
+                return f"{name}: maximum retries reached ({attempt}). {e!r}"
+        except Exception as e:
+            # Non-recoverable error (HTTP error, disk, etc.) — do not retry.
+            return f"{name}: {e!r}"
+    return None
+
+
+def choose_category(data):
     """
     Choose a category for aerials
+    Args:
+        data: Parsed manifest dict
+
     Returns:
-        chosen_category_obj: Chosen category object
+        chosen_category_obj: Chosen category object, or {} for "All"
     """
-    chosen_category_obj = {}
-    with open(JSON_FILE_PATH) as f:
-        data = json.load(f)
+    print("Select aerial category:")
 
-        # Display a choice of aerials categories
-        print("Select aerial category:")
+    categories = []
+    for i, category in enumerate(data["categories"], start=1):
+        print(f"{i}. " + category["localizedNameKey"].replace("AerialCategory", ""))
+        categories.append(category["localizedNameKey"])
 
-        categories = []
-        i = 0
-        for category in data["categories"]:
-            i = i + 1
-            print(
-                str(i)
-                + ". "
-                + category["localizedNameKey"].replace("AerialCategory", "")
-            )
-            categories.append(category["localizedNameKey"])
+    categories.append("All")
+    print(f"{len(categories)}. All")
 
-        categories.append("All")
-        print(str(i + 1) + ". All")
-
-        choice = input("Enter category number: ")
-        chosen_category = categories[int(choice) - 1]
-        if chosen_category != "All":
-            chosen_category_obj = {}
-            for category in data["categories"]:
-                if category["localizedNameKey"] == chosen_category:
-                    chosen_category_obj = category
-                    break
-    return chosen_category_obj
+    chosen_category = categories[prompt_index("Enter category number: ", len(categories))]
+    if chosen_category == "All":
+        return {}
+    for category in data["categories"]:
+        if category["localizedNameKey"] == chosen_category:
+            return category
+    return {}
 
 
 def choose_subcategory(category_obj):
@@ -240,33 +247,69 @@ def choose_subcategory(category_obj):
         category_obj: Category object
 
     Returns:
-        chosen_subcategory_obj: Chosen subcategory object
+        chosen_subcategory_obj: Chosen subcategory object, or {} for "All"
     """
-    chosen_subcategory_obj = {}
-    with open(JSON_FILE_PATH) as f:
-        data = json.load(f)
-        # Get subcategories
-        subcategories = []
-        j = 0
-        # Print subcategories
-        print("Select a subcategory in " + category_obj['localizedNameKey'].replace('AerialCategory', '') + ":")
-        for subcat in category_obj['subcategories']:
-            j = j + 1
-            print(str(j) + '. ' + subcat['localizedNameKey'].replace('AerialSubcategory', ''))
-            subcategories.append(subcat['localizedNameKey'])
+    print(
+        "Select a subcategory in "
+        + category_obj["localizedNameKey"].replace("AerialCategory", "")
+        + ":"
+    )
 
-        subcategories.append('All')
-        print(str(j + 1) + '. All')
+    subcategories = []
+    for j, subcat in enumerate(category_obj["subcategories"], start=1):
+        print(f"{j}. " + subcat["localizedNameKey"].replace("AerialSubcategory", ""))
+        subcategories.append(subcat["localizedNameKey"])
 
-        choice = input("Enter subcategory number: ")
-        chosen_subcategory = subcategories[int(choice) - 1]
-        if chosen_subcategory != "All":
-            chosen_subcategory_obj = {}
-            for subcat in category_obj["subcategories"]:
-                if subcat["localizedNameKey"] == chosen_subcategory:
-                    chosen_subcategory_obj = subcat
-                    break
-    return chosen_subcategory_obj
+    subcategories.append("All")
+    print(f"{len(subcategories)}. All")
+
+    chosen = subcategories[prompt_index("Enter subcategory number: ", len(subcategories))]
+    if chosen == "All":
+        return {}
+    for subcat in category_obj["subcategories"]:
+        if subcat["localizedNameKey"] == chosen:
+            return subcat
+    return {}
+
+
+def prompt_index(prompt, count):
+    """
+    Prompt repeatedly until the user enters a valid 1..count integer.
+    Args:
+        prompt: Text shown at the input prompt
+        count: Number of valid options
+
+    Returns:
+        The chosen index, zero-based.
+    """
+    while True:
+        choice = input(prompt)
+        try:
+            idx = int(choice) - 1
+        except ValueError:
+            print("Please enter a number.")
+            continue
+        if 0 <= idx < count:
+            return idx
+        print(f"Please enter a number between 1 and {count}.")
+
+
+def dedupe_by_id(aerials):
+    """
+    Remove duplicate aerials, keeping the first occurrence of each id.
+    Args:
+        aerials: Aerials list
+
+    Returns:
+        A new list with duplicate ids removed.
+    """
+    seen = set()
+    unique = []
+    for a in aerials:
+        if a["id"] not in seen:
+            seen.add(a["id"])
+            unique.append(a)
+    return unique
 
 
 def download_all_aerials(aerials):
@@ -278,61 +321,32 @@ def download_all_aerials(aerials):
     Returns:
         None
     """
-    filtered_aerials = []
-    aerials_set = set()
-    # format the list of all aerials urls
-    for a in aerials:
-        if a["id"] not in aerials_set:
-            aerials_set.add(a["id"])
-            filtered_aerials.append(a)
-        else:
-            for _ in a["categories"]:
-                if a["id"] not in aerials_set:
-                    aerials_set.add(a["id"])
-                    filtered_aerials.append(a)
-            for _ in a["subcategories"]:
-                if a["id"] not in aerials_set:
-                    aerials_set.add(a["id"])
-                    filtered_aerials.append(a)
-    start_download_of_aerials_list(filtered_aerials)
+    start_download_of_aerials_list(dedupe_by_id(aerials))
 
 
-def download_filtered_aerials(aerials):
+def download_filtered_aerials(aerials, data):
     """
-    Download filtered aerials
+    Download a user-selected subset of aerials
     Args:
         aerials: Aerials list
+        data: Parsed manifest dict
 
     Returns:
         None
 
     """
-    subcategory_obj = {}
+    category_obj = choose_category(data)
+    subcategory_obj = choose_subcategory(category_obj) if category_obj else {}
+
     filtered_aerials = []
-    aerials_set = set()
-
-    category_obj = choose_category()
-    if category_obj != {}:
-        subcategory_obj = choose_subcategory(category_obj)
-
-    for a in aerials:
-        if category_obj == {}:
-            if a["id"] not in aerials_set:
-                aerials_set.add(a["id"])
+    for a in dedupe_by_id(aerials):
+        if not category_obj:
+            filtered_aerials.append(a)
+        elif subcategory_obj:
+            if subcategory_obj["id"] in a["subcategories"]:
                 filtered_aerials.append(a)
-        else:
-            if subcategory_obj != {}:
-                for sub in a["subcategories"]:
-                    if sub == subcategory_obj["id"]:
-                        if a["id"] not in aerials_set:
-                            aerials_set.add(a["id"])
-                            filtered_aerials.append(a)
-            else:
-                for cat in a["categories"]:
-                    if cat == category_obj["id"]:
-                        if a["id"] not in aerials_set:
-                            aerials_set.add(a["id"])
-                            filtered_aerials.append(a)
+        elif category_obj["id"] in a["categories"]:
+            filtered_aerials.append(a)
 
     def aerial_name(aerial: dict):
         """
@@ -361,6 +375,10 @@ def download_filtered_aerials(aerials):
         multi=True,
     )
 
+    if not selected_aerials:
+        print("No aerials selected.")
+        return
+
     # Filter filteredAerials based on the user's selection
     filtered_aerials = [
         aerial for aerial in filtered_aerials if aerial_name(aerial) in selected_aerials
@@ -388,15 +406,32 @@ def start_download_of_aerials_list(_list: List[Dict]):
     # Get the number of download threads from the environment variable
     download_threads = int(os.environ.get("DOWNLOAD_THREADS", 1))
 
-    max_retry = 5
-
+    errors = []
     with ThreadPoolExecutor(max_workers=download_threads) as executor:
-        executor.map(download_aerials_parallel, _list, [max_retry] * len(_list))
+        futures = [
+            executor.submit(download_aerials_parallel, aerial, MAX_RETRY)
+            for aerial in _list
+        ]
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+            except Exception as e:  # pragma: no cover - unexpected escape
+                result = repr(e)
+            if result:
+                errors.append(result)
+
+    if errors:
+        print(f"\n{len(errors)} download(s) failed:")
+        for err in errors:
+            print(f"  - {err}")
 
 
-def choose_aerials():
+def choose_aerials(data):
     """
     Choose specific aerials or download all aerials
+    Args:
+        data: Parsed manifest dict
+
     Returns:
         None
     """
@@ -405,26 +440,33 @@ def choose_aerials():
     print("2. Download all aerials")
     choice = input("Enter option number: ")
 
-    aerials = get_aerials(JSON_FILE_PATH)
+    aerials = get_aerials(data)
 
     if choice == "2":
-        # Format the list of all aerials urls
         download_all_aerials(aerials)
+    elif choice == "1":
+        download_filtered_aerials(aerials, data)
+    else:
+        print("Unknown option.")
 
-    if choice == "1":
-        download_filtered_aerials(aerials)
+
+def main():
+    """Entry point: load the manifest, prompt, download, then refresh macOS."""
+    check_permissions()
+    print(f"Loading Aerials list{' (pre-Tahoe)' if IS_LEGACY else ''}")
+    data = load_manifest(JSON_FILE_PATH)
+    choose_aerials(data)
+    if IS_LEGACY:
+        print("Updating Aerials Database")
+        update_sql()
+        print("Restarting service")
+        kill_service()
+    else:
+        print(
+            "Done. On Tahoe, close and reopen System Settings > Wallpaper "
+            "(or Screen Saver) for the new aerials to appear."
+        )
 
 
-check_permissions()
-print(f"Loading Aerials list{' (pre-Tahoe)' if IS_LEGACY else ''}")
-choose_aerials()
-if IS_LEGACY:
-    print("Updating Aerials Database")
-    update_sql()
-    print("Restarting service")
-    kill_service()
-else:
-    print(
-        "Done. On Tahoe, close and reopen System Settings > Wallpaper "
-        "(or Screen Saver) for the new aerials to appear."
-    )
+if __name__ == "__main__":
+    main()
