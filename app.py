@@ -6,6 +6,7 @@ import requests
 import tqdm
 import os
 import os.path
+import platform
 import sqlite3
 import subprocess
 import sys
@@ -29,8 +30,10 @@ TAHOE_AERIAL_FOLDER_PATH = os.path.expanduser(
 )
 
 # Tahoe (macOS 26+) moved aerials out of /Library/.../idleassetsd into ~/Library/.../wallpaper.
-# Detect by presence of the legacy entries.json — it does not exist on Tahoe or newer.
-IS_LEGACY = os.path.exists(LEGACY_JSON_FILE_PATH)
+# Detect by OS version, not by the legacy entries.json: upgrading to Tahoe leaves the old
+# files behind (#21). Pre-Tahoe is 10.x-15.x; Tahoe reports 26, or 16 to Pythons built
+# against an older SDK (SYSTEM_VERSION_COMPAT), so anything >= 16 is Tahoe or newer.
+IS_LEGACY = int(platform.mac_ver()[0].split(".")[0]) < 16
 JSON_FILE_PATH = LEGACY_JSON_FILE_PATH if IS_LEGACY else TAHOE_JSON_FILE_PATH
 AERIAL_FOLDER_PATH = LEGACY_AERIAL_FOLDER_PATH if IS_LEGACY else TAHOE_AERIAL_FOLDER_PATH
 
